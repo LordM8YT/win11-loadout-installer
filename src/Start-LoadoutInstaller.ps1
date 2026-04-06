@@ -171,7 +171,10 @@ function Start-LoadoutBuild {
 
     Write-Section "Starter builder"
     Write-Host "Bruker repo: $script:DependencyRoot"
-    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $BuilderPath -IsoPath $Plan.IsoPath -EditionIndex $Plan.EditionIndex
+    $workingRoot = Join-Path $script:DependencyRoot "work"
+    $outputRoot = Join-Path $script:DependencyRoot "output"
+
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $BuilderPath -IsoPath $Plan.IsoPath -EditionIndex $Plan.EditionIndex -WorkingRoot $workingRoot -OutputRoot $outputRoot
 }
 
 Show-Banner

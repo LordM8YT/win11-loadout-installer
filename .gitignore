@@ -3,4 +3,5 @@
 *.bak
 Thumbs.db
 Desktop.ini
-
+deps/
+output/
