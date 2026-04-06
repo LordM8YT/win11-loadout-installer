@@ -6,6 +6,20 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib\UiHelpers.ps1")
 . (Join-Path $PSScriptRoot "lib\ProfileCatalog.ps1")
 
+$script:DependencyRepoUrl = "https://github.com/LordM8YT/win11-gaming-loadout.git"
+$script:DependencyRoot = (Join-Path $PSScriptRoot "..\deps\win11-gaming-loadout")
+
+function Test-IsElevated {
+    $null = & fltmc.exe 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-Administrator {
+    if (-not (Test-IsElevated)) {
+        throw "Dette scriptet maa kjores som administrator for aa kunne lese editions og starte ISO-builderen."
+    }
+}
+
 function Show-Banner {
     Clear-Host
     Write-Host "Win11 Loadout Installer" -ForegroundColor Green
@@ -37,6 +51,7 @@ function Build-Plan {
     param(
         [string]$IsoPath,
         [pscustomobject]$Profile,
+        [int]$EditionIndex,
         [bool]$UseDebloat,
         [bool]$UseApps
     )
@@ -44,6 +59,7 @@ function Build-Plan {
     return [pscustomobject]@{
         IsoPath = $IsoPath
         Profile = $Profile.Key
+        EditionIndex = $EditionIndex
         Debloat = $UseDebloat
         Apps = $UseApps
         CreatedAt = (Get-Date).ToString("s")
@@ -56,6 +72,7 @@ function Show-Plan {
     Write-Section "Oppsummering"
     Write-Host "ISO:      $($Plan.IsoPath)"
     Write-Host "Profil:   $($Plan.Profile)"
+    Write-Host "Edition:  $($Plan.EditionIndex)"
     Write-Host "Debloat:  $($Plan.Debloat)"
     Write-Host "Apps:     $($Plan.Apps)"
 }
@@ -73,26 +90,113 @@ function Save-Plan {
     return (Resolve-Path -LiteralPath $planPath).Path
 }
 
+function Ensure-DependencyRepo {
+    Write-Section "Loadout dependency"
+
+    $depsDir = Split-Path -Path $script:DependencyRoot -Parent
+    if (-not (Test-Path -LiteralPath $depsDir)) {
+        New-Item -ItemType Directory -Path $depsDir | Out-Null
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $script:DependencyRoot ".git")) {
+        Write-Host "Oppdaterer win11-gaming-loadout..."
+        git -C $script:DependencyRoot pull --ff-only
+    }
+    else {
+        Write-Host "Laster ned win11-gaming-loadout..."
+        git clone $script:DependencyRepoUrl $script:DependencyRoot
+    }
+
+    $builderPath = Join-Path $script:DependencyRoot "Build-GamingISO.ps1"
+    if (-not (Test-Path -LiteralPath $builderPath)) {
+        throw "Fant ikke Build-GamingISO.ps1 i dependency-repoet."
+    }
+
+    return (Resolve-Path -LiteralPath $builderPath).Path
+}
+
+function Get-WindowsEditions {
+    param([string]$IsoPath)
+
+    $diskImage = $null
+    try {
+        $diskImage = Mount-DiskImage -ImagePath $IsoPath -PassThru
+        $volume = $diskImage | Get-Volume
+        $drive = "$($volume.DriveLetter):"
+        $wimPath = Join-Path $drive "sources\install.wim"
+        $esdPath = Join-Path $drive "sources\install.esd"
+        $imagePath = if (Test-Path -LiteralPath $wimPath) { $wimPath } else { $esdPath }
+
+        if (-not (Test-Path -LiteralPath $imagePath)) {
+            throw "Fant ikke install.wim eller install.esd i ISO-en."
+        }
+
+        return Get-WindowsImage -ImagePath $imagePath | Select-Object ImageIndex, ImageName, Architecture
+    }
+    finally {
+        if ($diskImage) {
+            Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Select-EditionIndex {
+    param([string]$IsoPath)
+
+    $editions = Get-WindowsEditions -IsoPath $IsoPath
+
+    Write-Section "Tilgjengelige editions"
+    foreach ($edition in $editions) {
+        Write-Host ("[{0}] {1} ({2})" -f $edition.ImageIndex, $edition.ImageName, $edition.Architecture)
+    }
+
+    while ($true) {
+        $value = Read-Host "Skriv edition index"
+        $parsed = 0
+        if ([int]::TryParse($value, [ref]$parsed)) {
+            if ($editions.ImageIndex -contains $parsed) {
+                return $parsed
+            }
+        }
+
+        Write-Host "Ugyldig edition index. Velg et av numrene over." -ForegroundColor Yellow
+    }
+}
+
+function Start-LoadoutBuild {
+    param(
+        [string]$BuilderPath,
+        [pscustomobject]$Plan
+    )
+
+    Write-Section "Starter builder"
+    Write-Host "Bruker repo: $script:DependencyRoot"
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $BuilderPath -IsoPath $Plan.IsoPath -EditionIndex $Plan.EditionIndex
+}
+
 Show-Banner
 
 try {
+    Ensure-Administrator
     $isoPath = Select-IsoPath
+    $editionIndex = Select-EditionIndex -IsoPath $isoPath
     $profile = Select-Profile
     $useDebloat = Read-YesNo -Prompt "Aktiver debloat og stoyreduksjon?" -Default $true
     $useApps = Read-YesNo -Prompt "Installer kuraterte apper etter installasjon?" -Default $true
 
-    $plan = Build-Plan -IsoPath $isoPath -Profile $profile -UseDebloat $useDebloat -UseApps $useApps
+    $plan = Build-Plan -IsoPath $isoPath -Profile $profile -EditionIndex $editionIndex -UseDebloat $useDebloat -UseApps $useApps
     Show-Plan -Plan $plan
 
-    if (-not (Read-YesNo -Prompt "Lagre planutkast for senere bygging?" -Default $true)) {
+    if (-not (Read-YesNo -Prompt "Last ned eller oppdater loadout-repoet og start bygging naa?" -Default $true)) {
         Write-Host "Avbrutt." -ForegroundColor Yellow
         exit 0
     }
 
     $savedPlan = Save-Plan -Plan $plan
+    $builderPath = Ensure-DependencyRepo
     Write-Section "Ferdig"
     Write-Host "Plan lagret i: $savedPlan" -ForegroundColor Green
-    Write-Host "Neste steg er aa koble denne wizard-en til ISO-builderen og Windows Setup-handoff."
+    Start-LoadoutBuild -BuilderPath $builderPath -Plan $plan
 }
 catch {
     Write-Host ""
