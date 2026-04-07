@@ -52,6 +52,9 @@ function Build-Plan {
         [string]$IsoPath,
         [pscustomobject]$Profile,
         [int]$EditionIndex,
+        [string]$ComputerName,
+        [string]$LocalUsername,
+        [bool]$HasLocalPassword,
         [bool]$UseDebloat,
         [bool]$UseApps
     )
@@ -60,6 +63,9 @@ function Build-Plan {
         IsoPath = $IsoPath
         Profile = $Profile.Key
         EditionIndex = $EditionIndex
+        ComputerName = $ComputerName
+        LocalUsername = $LocalUsername
+        HasLocalPassword = $HasLocalPassword
         Debloat = $UseDebloat
         Apps = $UseApps
         CreatedAt = (Get-Date).ToString("s")
@@ -73,6 +79,9 @@ function Show-Plan {
     Write-Host "ISO:      $($Plan.IsoPath)"
     Write-Host "Profil:   $($Plan.Profile)"
     Write-Host "Edition:  $($Plan.EditionIndex)"
+    Write-Host "PC-navn:  $($Plan.ComputerName)"
+    Write-Host "Bruker:   $($Plan.LocalUsername)"
+    Write-Host "Passord:  $(if ($Plan.HasLocalPassword) { 'Ja' } else { 'Nei' })"
     Write-Host "Debloat:  $($Plan.Debloat)"
     Write-Host "Apps:     $($Plan.Apps)"
 }
@@ -166,7 +175,8 @@ function Select-EditionIndex {
 function Start-LoadoutBuild {
     param(
         [string]$BuilderPath,
-        [pscustomobject]$Plan
+        [pscustomobject]$Plan,
+        [string]$LocalPassword
     )
 
     Write-Section "Starter builder"
@@ -174,7 +184,23 @@ function Start-LoadoutBuild {
     $workingRoot = Join-Path $script:DependencyRoot "work"
     $outputRoot = Join-Path $script:DependencyRoot "output"
 
-    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $BuilderPath -IsoPath $Plan.IsoPath -EditionIndex $Plan.EditionIndex -WorkingRoot $workingRoot -OutputRoot $outputRoot
+    $arguments = @(
+        "-ExecutionPolicy", "Bypass",
+        "-NoProfile",
+        "-File", $BuilderPath,
+        "-IsoPath", $Plan.IsoPath,
+        "-EditionIndex", $Plan.EditionIndex,
+        "-WorkingRoot", $workingRoot,
+        "-OutputRoot", $outputRoot,
+        "-ComputerName", $Plan.ComputerName,
+        "-LocalUsername", $Plan.LocalUsername
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($LocalPassword)) {
+        $arguments += @("-LocalPassword", $LocalPassword)
+    }
+
+    & powershell.exe @arguments
 }
 
 Show-Banner
@@ -184,10 +210,14 @@ try {
     $isoPath = Select-IsoPath
     $editionIndex = Select-EditionIndex -IsoPath $isoPath
     $profile = Select-Profile
+    Write-Section "Lokal konto"
+    $computerName = Read-OptionalText -Prompt "Maskinnavn (tom = GAMINGLAB-PC)" -Default "GAMINGLAB-PC"
+    $localUsername = Read-RequiredText -Prompt "Lokalt brukernavn"
+    $localPassword = Read-OptionalText -Prompt "Lokalt passord (tomt = ingen passord)" -Default ""
     $useDebloat = Read-YesNo -Prompt "Aktiver debloat og stoyreduksjon?" -Default $true
     $useApps = Read-YesNo -Prompt "Installer kuraterte apper etter installasjon?" -Default $true
 
-    $plan = Build-Plan -IsoPath $isoPath -Profile $profile -EditionIndex $editionIndex -UseDebloat $useDebloat -UseApps $useApps
+    $plan = Build-Plan -IsoPath $isoPath -Profile $profile -EditionIndex $editionIndex -ComputerName $computerName -LocalUsername $localUsername -HasLocalPassword (-not [string]::IsNullOrWhiteSpace($localPassword)) -UseDebloat $useDebloat -UseApps $useApps
     Show-Plan -Plan $plan
 
     if (-not (Read-YesNo -Prompt "Last ned eller oppdater loadout-repoet og start bygging naa?" -Default $true)) {
@@ -199,7 +229,7 @@ try {
     $builderPath = Ensure-DependencyRepo
     Write-Section "Ferdig"
     Write-Host "Plan lagret i: $savedPlan" -ForegroundColor Green
-    Start-LoadoutBuild -BuilderPath $builderPath -Plan $plan
+    Start-LoadoutBuild -BuilderPath $builderPath -Plan $plan -LocalPassword $localPassword
 }
 catch {
     Write-Host ""

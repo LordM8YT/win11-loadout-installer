@@ -17,11 +17,12 @@ It does not replace Windows Setup. Instead, it sits in front of it, collects use
 1. Select a Windows 11 ISO
 2. Choose edition
 3. Choose install profile
-4. Pick optional tweaks and apps
-5. Generate `autounattend.xml`
-6. Stage post-install payload
-7. Launch Windows Setup with the generated configuration
-8. Resume post-install customization after first login
+4. Choose local account details
+5. Pick optional tweaks and apps
+6. Generate `autounattend.xml`
+7. Stage post-install payload
+8. Launch Windows Setup with the generated configuration
+9. Resume post-install customization after first login
 
 ## Profiles
 
@@ -56,4 +57,3 @@ cd "C:\Users\Patri\Desktop\win11-loadout-installer\src"
 This project focuses on the installer orchestration experience.
 
 The lower-level ISO customization and payload logic should stay reusable and separate so both projects can evolve independently.
-

@@ -55,3 +55,29 @@ function Read-YesNo {
     }
 }
 
+function Read-OptionalText {
+    param(
+        [string]$Prompt,
+        [string]$Default = ""
+    )
+
+    $value = Read-Host $Prompt
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+
+    return $value.Trim()
+}
+
+function Read-RequiredText {
+    param([string]$Prompt)
+
+    while ($true) {
+        $value = Read-Host $Prompt
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value.Trim()
+        }
+
+        Write-Host "Dette feltet kan ikke vaere tomt." -ForegroundColor Yellow
+    }
+}
